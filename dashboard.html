@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tableau de bord opérateur — Trajets en direct</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root { --navy:#0b1f3a; --blue:#1e5ab8; --gold:#d4a72c; }
+  body { margin:0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:var(--navy); }
+  header { background:var(--navy); color:#fff; padding:0.9rem 1.2rem; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { margin:0; font-size:1.05rem; }
+  #layout { display:flex; height: calc(100vh - 56px); }
+  #map { flex:1; }
+  #sidebar { width: 300px; border-left:1px solid #e3e7ee; overflow-y:auto; background:#fafbfd; }
+  .trip-item { padding:0.8rem 1rem; border-bottom:1px solid #eee; font-size:0.85rem; }
+  .trip-item strong { display:block; color:var(--navy); }
+  .trip-item .meta { color:#5a6475; font-size:0.78rem; margin-top:0.2rem; }
+  .trip-item .route { font-size:0.8rem; margin-top:0.35rem; color:var(--navy); }
+  .trip-item .route b { color:var(--blue); }
+  .popup-table { font-size:0.8rem; line-height:1.5; }
+  .popup-table td:first-child { color:#5a6475; padding-right:0.6rem; vertical-align:top; }
+  .empty { padding:1rem; color:#5a6475; font-size:0.9rem; }
+  .pill { background:var(--gold); color:#3a2c00; border-radius:999px; padding:0.1rem 0.5rem; font-size:0.7rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Fretchain — Trajets voyageurs en direct</h1>
+  <span class="pill" id="countPill">0 trajet actif</span>
+</header>
+<div id="layout">
+  <div id="map"></div>
+  <div id="sidebar"><div class="empty">En attente de trajets actifs…</div></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const map = L.map('map').setView([3.848, 11.502], 7); // Yaoundé par défaut
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+}).addTo(map);
+
+const markers = {};   // tripId -> L.marker
+const tripInfo = {};  // tripId -> {displayName, lineLabel, lastSeen}
+const sidebar = document.getElementById('sidebar');
+const countPill = document.getElementById('countPill');
+
+function renderSidebar() {
+  const ids = Object.keys(tripInfo);
+  countPill.textContent = `${ids.length} trajet${ids.length > 1 ? 's' : ''} actif${ids.length > 1 ? 's' : ''}`;
+  if (ids.length === 0) {
+    sidebar.innerHTML = '<div class="empty">En attente de trajets actifs…</div>';
+    return;
+  }
+  sidebar.innerHTML = ids.map((id) => {
+    const t = tripInfo[id];
+    const fare = t.fareAmount != null ? `${t.fareAmount.toLocaleString('fr-FR')} ${t.fareCurrency || ''}` : null;
+    return `<div class="trip-item">
+      <strong>${escapeHtml(t.displayName)}</strong>
+      <div class="meta">${escapeHtml(t.transportMode || 'Transport non précisé')}${t.agencyName ? ' · ' + escapeHtml(t.agencyName) : ''}</div>
+      <div class="route"><b>${escapeHtml(t.originLabel || '?')}</b> → <b>${escapeHtml(t.destinationLabel || '?')}</b></div>
+      ${fare ? `<div class="meta">Coût payé : ${fare}</div>` : ''}
+      ${t.vehiclePlate ? `<div class="meta">Véhicule : ${escapeHtml(t.vehiclePlate)}${t.seatNumber ? ' · siège ' + escapeHtml(t.seatNumber) : ''}</div>` : ''}
+      <div class="meta">Vu à ${new Date(t.lastSeen).toLocaleTimeString('fr-FR')}</div>
+    </div>`;
+  }).join('');
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+const socket = io();
+socket.emit('dashboard:join');
+
+socket.on('position:broadcast', (msg) => {
+  const {
+    tripId, travelerDisplayName, lineLabel, transportMode, agencyName,
+    originLabel, destinationLabel, fareAmount, fareCurrency,
+    vehiclePlate, seatNumber, scheduledDepartureAt, notes,
+    lat, lng, recordedAt,
+  } = msg;
+
+  tripInfo[tripId] = {
+    displayName: travelerDisplayName, lineLabel, transportMode, agencyName,
+    originLabel, destinationLabel, fareAmount, fareCurrency,
+    vehiclePlate, seatNumber, scheduledDepartureAt, notes,
+    lastSeen: recordedAt,
+  };
+
+  const popupHtml = `
+    <strong>${escapeHtml(travelerDisplayName)}</strong>
+    <table class="popup-table">
+      <tr><td>Transport</td><td>${escapeHtml(transportMode || '—')}${agencyName ? ' (' + escapeHtml(agencyName) + ')' : ''}</td></tr>
+      <tr><td>Trajet</td><td>${escapeHtml(originLabel || '?')} → ${escapeHtml(destinationLabel || '?')}</td></tr>
+      ${fareAmount != null ? `<tr><td>Coût payé</td><td>${Number(fareAmount).toLocaleString('fr-FR')} ${escapeHtml(fareCurrency || '')}</td></tr>` : ''}
+      ${vehiclePlate ? `<tr><td>Véhicule</td><td>${escapeHtml(vehiclePlate)}${seatNumber ? ' · siège ' + escapeHtml(seatNumber) : ''}</td></tr>` : ''}
+      ${scheduledDepartureAt ? `<tr><td>Départ prévu</td><td>${new Date(scheduledDepartureAt).toLocaleString('fr-FR')}</td></tr>` : ''}
+      ${notes ? `<tr><td>Notes</td><td>${escapeHtml(notes)}</td></tr>` : ''}
+    </table>`;
+
+  if (markers[tripId]) {
+    markers[tripId].setLatLng([lat, lng]);
+    markers[tripId].setPopupContent(popupHtml);
+  } else {
+    markers[tripId] = L.marker([lat, lng]).addTo(map).bindPopup(popupHtml);
+  }
+  renderSidebar();
+});
+</script>
+</body>
+</html>
