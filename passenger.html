@@ -4,7 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Partage de trajet — Voyageur</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
+  #selfMap { height: 260px; border-radius: 10px; margin-top: 0.8rem; display:none; }
   :root { --navy:#0b1f3a; --blue:#1e5ab8; --gold:#d4a72c; }
   body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin:0; background:#f4f6fa; color:var(--navy); }
   header { background:var(--navy); color:#fff; padding:1.2rem 1rem; }
@@ -29,7 +31,7 @@
 </style>
 </head>
 <body>
-<header><h1>Safetrip — Partage de trajet voyageur</h1></header>
+<header><h1>Fretchain — Partage de trajet voyageur</h1></header>
 <main>
 
   <section id="consentCard" class="card">
@@ -52,6 +54,7 @@
   <section id="tripCard" class="card" style="display:none;">
     <h2 style="margin-top:0;">Fiche de trajet</h2>
     <div id="statusBox" class="status off">Partage inactif.</div>
+    <div id="selfMap"></div>
 
     <label class="field-label">Moyen de transport *</label>
     <select id="transportMode">
@@ -112,12 +115,22 @@
     <button id="startBtn">Démarrer le partage</button>
     <button id="stopBtn" class="secondary" disabled>Arrêter le partage</button>
     <div class="hint">Le partage s'arrête automatiquement si vous fermez cette page, verrouillez un appareil très ancien en veille profonde, ou perdez la connexion. Il ne continue jamais en arrière-plan à votre insu.</div>
+
+    <div id="shareBox" style="display:none; margin-top:1rem; padding-top:1rem; border-top:1px solid #eee;">
+      <label class="field-label">Lien de suivi à partager avec un proche</label>
+      <input type="text" id="shareLink" readonly style="margin-bottom:0.5rem;" />
+      <button id="copyLinkBtn" class="secondary">Copier le lien</button>
+      <button id="shareBtn" style="display:none;">Partager…</button>
+      <div class="hint">Toute personne ayant ce lien peut voir ce trajet en direct, sans se connecter — ne le partagez qu'avec des personnes de confiance. Il cesse de fonctionner dès que vous arrêtez le partage.</div>
+    </div>
+
     <hr style="margin:1rem 0; border:none; border-top:1px solid #eee;" />
     <button id="revokeBtn" class="danger">Retirer mon consentement définitivement</button>
   </section>
 
 </main>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const consentCheckbox = document.getElementById('consentCheckbox');
@@ -139,11 +152,35 @@ const vehiclePlateInput = document.getElementById('vehiclePlate');
 const seatNumberInput = document.getElementById('seatNumber');
 const scheduledDepartureAtInput = document.getElementById('scheduledDepartureAt');
 const notesInput = document.getElementById('notes');
+const shareBox = document.getElementById('shareBox');
+const shareLinkInput = document.getElementById('shareLink');
+const copyLinkBtn = document.getElementById('copyLinkBtn');
+const shareBtn = document.getElementById('shareBtn');
 
 let travelerId = localStorage.getItem('travelerId') || null;
 let tripId = null;
 let watchId = null;
 const socket = io();
+
+const selfMapEl = document.getElementById('selfMap');
+let selfMap = null;
+let selfMarker = null;
+
+function showSelfPosition(lat, lng) {
+  selfMapEl.style.display = 'block';
+  if (!selfMap) {
+    selfMap = L.map(selfMapEl).setView([lat, lng], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(selfMap);
+    selfMarker = L.marker([lat, lng]).addTo(selfMap);
+  } else {
+    selfMarker.setLatLng([lat, lng]);
+    selfMap.setView([lat, lng], selfMap.getZoom());
+    // Leaflet a besoin de ça si la carte était masquée (display:none) à l'initialisation
+    setTimeout(() => selfMap.invalidateSize(), 0);
+  }
+}
 
 function refreshConsentButton() {
   acceptBtn.disabled = !(consentCheckbox.checked && displayNameInput.value.trim());
@@ -220,6 +257,13 @@ startBtn.addEventListener('click', async () => {
    fareAmountInput, fareCurrencyInput, vehiclePlateInput, seatNumberInput,
    scheduledDepartureAtInput, notesInput].forEach((el) => { el.disabled = true; });
 
+  const shareUrl = `${location.origin}/track.html?trip=${tripId}`;
+  shareLinkInput.value = shareUrl;
+  shareBox.style.display = 'block';
+  if (navigator.share) {
+    shareBtn.style.display = 'inline-block';
+  }
+
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
       socket.emit('position:update', {
@@ -228,6 +272,7 @@ startBtn.addEventListener('click', async () => {
         lng: pos.coords.longitude,
         accuracyM: pos.coords.accuracy,
       });
+      showSelfPosition(pos.coords.latitude, pos.coords.longitude);
     },
     (err) => {
       statusBox.className = 'status off';
@@ -253,9 +298,30 @@ async function stopSharing() {
   [transportModeInput, agencyNameInput, originLabelInput, destinationLabelInput,
    fareAmountInput, fareCurrencyInput, vehiclePlateInput, seatNumberInput,
    scheduledDepartureAtInput, notesInput].forEach((el) => { el.disabled = false; });
+  shareBox.style.display = 'none';
+  selfMapEl.style.display = 'none';
 }
 
 stopBtn.addEventListener('click', stopSharing);
+
+copyLinkBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(shareLinkInput.value);
+    copyLinkBtn.textContent = 'Lien copié ✓';
+    setTimeout(() => { copyLinkBtn.textContent = 'Copier le lien'; }, 2000);
+  } catch (e) {
+    shareLinkInput.select();
+    document.execCommand('copy');
+  }
+});
+
+shareBtn.addEventListener('click', () => {
+  navigator.share({
+    title: 'Suivi de mon trajet',
+    text: 'Suivez mon trajet en direct :',
+    url: shareLinkInput.value,
+  }).catch(() => {});
+});
 
 window.addEventListener('beforeunload', () => {
   if (tripId) {

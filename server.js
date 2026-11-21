@@ -1,4 +1,4 @@
-// Safetrip Voyageur Tracker — prototype
+// Fretchain Voyageur Tracker — prototype
 //
 // PRINCIPE DE CONCEPTION : ce service ne peut suivre un voyageur que
 // pendant que (a) son appareil est allumé, (b) il a explicitement donné
@@ -30,6 +30,10 @@ const positionsByTrip = new Map(); // tripId -> [{ lat, lng, accuracyM, recorded
 
 const app = express();
 app.use(express.json());
+// NB : ce fichier sert les pages HTML depuis le même dossier que lui
+// (structure "plate", telle que déployée sur GitHub/Render). Si vous
+// remettez une arborescence server/ + public/ en local, changez ceci en
+// path.join(__dirname, '..', 'public').
 app.use(express.static(__dirname));
 
 // --- Consentement -----------------------------------------------------
@@ -127,7 +131,10 @@ app.post('/api/trips', (req, res) => {
 app.post('/api/trips/:tripId/end', (req, res) => {
   const { tripId } = req.params;
   const trip = trips.get(tripId);
-  if (trip) trip.endedAt = new Date().toISOString();
+  if (trip) {
+    trip.endedAt = new Date().toISOString();
+    io.to(`trip:${tripId}`).emit('track:ended', { endedAt: trip.endedAt });
+  }
   res.json({ ok: true });
 });
 
@@ -185,9 +192,39 @@ io.on('connection', (socket) => {
     };
     positionsByTrip.get(tripId).push(position);
 
-    io.to('dashboard').emit('position:broadcast', broadcastPayload(trip, traveler, position));
+    const payload = broadcastPayload(trip, traveler, position);
+    io.to('dashboard').emit('position:broadcast', payload);
+    // Diffusion scopée : seuls les sockets qui suivent CE trajet précis
+    // (via un lien de partage) la reçoivent — jamais les autres trajets.
+    io.to(`trip:${tripId}`).emit('position:broadcast', payload);
 
     if (ack) ack({ ok: true });
+  });
+
+  // Suivi par lien de partage : un contact qui ouvre track.html?trip=<id>
+  // ne rejoint QUE la room de ce trajet précis, jamais la vue globale du
+  // dashboard opérateur. Refusé si le trajet n'existe plus ou que le
+  // consentement a été retiré entre-temps.
+  socket.on('track:join', (msg) => {
+    const { tripId } = msg || {};
+    const trip = trips.get(tripId);
+    const traveler = trip ? travelers.get(trip.travelerId) : null;
+
+    if (!trip || !traveler || traveler.revokedAt) {
+      socket.emit('track:error', { error: 'trip_unavailable' });
+      return;
+    }
+
+    socket.join(`trip:${tripId}`);
+
+    const positions = positionsByTrip.get(tripId) || [];
+    const last = positions[positions.length - 1];
+    if (last) {
+      socket.emit('position:broadcast', broadcastPayload(trip, traveler, last));
+    }
+    if (trip.endedAt) {
+      socket.emit('track:ended', { endedAt: trip.endedAt });
+    }
   });
 
   socket.on('dashboard:join', () => {

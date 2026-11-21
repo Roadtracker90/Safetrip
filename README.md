@@ -1,4 +1,4 @@
-# Safetrip Voyageur Tracker — prototype
+# Fretchain Voyageur Tracker — prototype
 
 Application de suivi de trajets voyageurs **avec consentement explicite**,
 sans capteur matériel à installer dans le véhicule : chaque voyageur
@@ -20,6 +20,13 @@ pendant la durée du trajet qu'il choisit de partager.
   transmise en direct au serveur, puis affichée sur `dashboard.html`
   (carte en temps réel façon "suivre mon bus"), avec le détail du trajet
   dans la popup du marqueur et la liste latérale.
+- Une fois le partage démarré, le voyageur obtient aussi un **lien de
+  suivi individuel** (`track.html?trip=<id>`) qu'il peut copier ou
+  partager via le bouton natif de partage du téléphone (WhatsApp, SMS,
+  etc.). Ce lien ne montre que ce trajet précis, jamais les autres
+  trajets actifs sur la plateforme — contrairement au dashboard
+  opérateur. Il cesse de fonctionner dès que le trajet est arrêté ou le
+  consentement retiré.
 - Le voyageur peut arrêter le partage ou retirer son consentement à tout
   moment ; toute transmission de position s'arrête immédiatement.
 
@@ -81,6 +88,8 @@ npm start
 
 - Écran voyageur : `http://localhost:3000/passenger.html`
 - Tableau de bord opérateur : `http://localhost:3000/dashboard.html`
+- Lien de suivi individuel (généré automatiquement après démarrage d'un
+  trajet voyageur) : `http://localhost:3000/track.html?trip=<tripId>`
 
 Ouvrez les deux dans des onglets/appareils différents pour voir le
 marqueur bouger sur la carte au fur et à mesure que la position du
@@ -89,7 +98,7 @@ outils développeur du navigateur si vous testez depuis un poste fixe).
 
 ## Conformité et points à traiter avant une mise en production
 
-Ce prototype pose les bases mais, pour un déploiement réel (Safetrip ou
+Ce prototype pose les bases mais, pour un déploiement réel (Fretchain ou
 autre), il reste à traiter :
 
 - **Base légale et CGU définitives** : faire valider le texte de
@@ -98,7 +107,7 @@ autre), il reste à traiter :
   conservation et les destinataires des données.
 - **Authentification** : actuellement, `travelerId` est un identifiant
   simple stocké côté client — à sécuriser (session, token signé, ou
-  compte lié à l'app Safetrip existante) avant toute donnée réelle.
+  compte lié à l'app Fretchain existante) avant toute donnée réelle.
 - **Persistance réelle** : ce prototype garde tout en mémoire (`Map` JS)
   pour éviter d'imposer Python/outils de compilation au premier essai.
   Toutes les données sont perdues à chaque redémarrage du serveur. Pour
@@ -111,7 +120,7 @@ autre), il reste à traiter :
   positions au-delà de la durée de rétention annoncée (30 jours dans le
   texte de consentement, à ajuster).
 - **Granularité du consentement** : si le produit final vise aussi les
-  chauffeurs/flotte Safetrip plutôt que des passagers, le même schéma
+  chauffeurs/flotte Fretchain plutôt que des passagers, le même schéma
   de consentement explicite s'applique à eux aussi — un employeur ne
   peut pas faire l'économie du consentement du salarié pour de la
   géolocalisation en dehors du cadre strictement professionnel défini
