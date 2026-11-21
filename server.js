@@ -1,4 +1,4 @@
-// Fretchain Voyageur Tracker — prototype
+// Safetrip Voyageur Tracker — prototype
 //
 // PRINCIPE DE CONCEPTION : ce service ne peut suivre un voyageur que
 // pendant que (a) son appareil est allumé, (b) il a explicitement donné
