@@ -242,6 +242,16 @@ startBtn.addEventListener('click', async () => {
   });
   const data = await res.json();
   if (!data.tripId) {
+    if (data.error === 'unknown_traveler') {
+      // Le serveur a redémarré (ex. redéploiement) et a perdu la mémoire
+      // de ce consentement : on redemande proprement plutôt que d'afficher
+      // une erreur confuse.
+      localStorage.removeItem('travelerId');
+      statusBox.className = 'status off';
+      statusBox.textContent = 'Le serveur a redémarré, merci de ré-accepter les conditions.';
+      setTimeout(() => location.reload(), 1200);
+      return;
+    }
     statusBox.className = 'status off';
     statusBox.textContent = data.error === 'missing_required_fields'
       ? 'Merci de renseigner au moins le moyen de transport, le départ et l\'arrivée.'

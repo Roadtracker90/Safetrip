@@ -57,13 +57,19 @@ véhicule — ce qui est justement le "capteur" que ce projet visait à
 
 ```
 voyageur-tracker/
-├── server/
-│   └── server.js       # Express + Socket.io, données en mémoire (Map JS)
-├── public/
-│   ├── passenger.html  # écran voyageur : consentement + partage
-│   └── dashboard.html  # écran opérateur : carte en direct (Leaflet/OSM)
+├── server.js       # Express + Socket.io + PostgreSQL (module "pg")
+├── passenger.html  # écran voyageur : consentement, fiche de trajet, partage
+├── dashboard.html  # écran opérateur : carte en direct (Leaflet/OSM)
+├── track.html      # lien de suivi individuel (un seul trajet)
 └── package.json
 ```
+
+Les données (voyageurs, trajets, positions) sont stockées dans PostgreSQL
+— elles survivent donc aux redémarrages du serveur (redéploiement, réveil
+après mise en veille sur le plan gratuit Render, etc.). Le serveur lit
+l'adresse de la base dans la variable d'environnement `DATABASE_URL` et
+crée les tables nécessaires automatiquement au démarrage s'il ne les
+trouve pas (`CREATE TABLE IF NOT EXISTS`).
 
 Flux de données :
 1. `POST /api/consent` → crée un `traveler` seulement après acceptation
@@ -80,11 +86,23 @@ Flux de données :
 
 ## Lancer le prototype
 
+Il faut une base PostgreSQL accessible (locale pour tester, ou celle
+fournie par votre hébergeur en production) et définir `DATABASE_URL` :
+
 ```bash
 npm install
-npm start
+DATABASE_URL="postgres://utilisateur:motdepasse@hote:5432/nom_de_base" npm start
 # Serveur sur http://localhost:3000
 ```
+
+Sous Windows (PowerShell) :
+```powershell
+$env:DATABASE_URL="postgres://utilisateur:motdepasse@hote:5432/nom_de_base"
+npm start
+```
+
+Sur Render, `DATABASE_URL` se configure dans l'onglet **Environment** du
+service (voir plus bas) — pas besoin de la taper à la main à chaque fois.
 
 - Écran voyageur : `http://localhost:3000/passenger.html`
 - Tableau de bord opérateur : `http://localhost:3000/dashboard.html`
@@ -108,12 +126,11 @@ autre), il reste à traiter :
 - **Authentification** : actuellement, `travelerId` est un identifiant
   simple stocké côté client — à sécuriser (session, token signé, ou
   compte lié à l'app Fretchain existante) avant toute donnée réelle.
-- **Persistance réelle** : ce prototype garde tout en mémoire (`Map` JS)
-  pour éviter d'imposer Python/outils de compilation au premier essai.
-  Toutes les données sont perdues à chaque redémarrage du serveur. Pour
-  la production, remplacer les `Map` de `server.js` par une vraie base
-  (Postgres, MySQL, ou SQLite si Python/build tools sont disponibles sur
-  la machine de déploiement).
+- **Sauvegardes et plan de reprise** : la persistance PostgreSQL résout la
+  perte de données au redémarrage, mais pas une panne de la base
+  elle-même — prévoir des sauvegardes régulières (la plupart des
+  hébergeurs, dont Render, proposent des sauvegardes automatiques sur
+  leurs plans PostgreSQL payants).
 - **Chiffrement en transit** : déployer derrière HTTPS/WSS, pas en HTTP
   simple comme dans ce prototype local.
 - **Purge automatique** : ajouter une tâche planifiée qui supprime les
