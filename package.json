@@ -1,7 +1,7 @@
 {
   "name": "voyageur-tracker",
   "version": "1.0.0",
-  "description": "Prototype de suivi de trajets voyageurs avec consentement explicite (Fretchain)",
+  "description": "Prototype de suivi de trajets voyageurs avec consentement explicite (Safetrip)",
   "main": "server/server.js",
   "scripts": {
     "start": "node server/server.js"
