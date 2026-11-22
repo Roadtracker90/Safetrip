@@ -1,4 +1,4 @@
-# Fretchain Voyageur Tracker — prototype
+# Safetrip Voyageur Tracker — prototype
 
 Application de suivi de trajets voyageurs **avec consentement explicite**,
 sans capteur matériel à installer dans le véhicule : chaque voyageur
@@ -149,7 +149,7 @@ Deux soucis observés en test (page qui n'affiche rien sur certains Android,
 
 ## Conformité et points à traiter avant une mise en production
 
-Ce prototype pose les bases mais, pour un déploiement réel (Fretchain ou
+Ce prototype pose les bases mais, pour un déploiement réel (Safetrip ou
 autre), il reste à traiter :
 
 - **Base légale et CGU définitives** : faire valider le texte de
@@ -158,7 +158,7 @@ autre), il reste à traiter :
   conservation et les destinataires des données.
 - **Authentification** : actuellement, `travelerId` est un identifiant
   simple stocké côté client — à sécuriser (session, token signé, ou
-  compte lié à l'app Fretchain existante) avant toute donnée réelle.
+  compte lié à l'app Safetrip existante) avant toute donnée réelle.
 - **Sauvegardes et plan de reprise** : la persistance PostgreSQL résout la
   perte de données au redémarrage, mais pas une panne de la base
   elle-même — prévoir des sauvegardes régulières (la plupart des
@@ -170,7 +170,7 @@ autre), il reste à traiter :
   positions au-delà de la durée de rétention annoncée (30 jours dans le
   texte de consentement, à ajuster).
 - **Granularité du consentement** : si le produit final vise aussi les
-  chauffeurs/flotte Fretchain plutôt que des passagers, le même schéma
+  chauffeurs/flotte Safetrip plutôt que des passagers, le même schéma
   de consentement explicite s'applique à eux aussi — un employeur ne
   peut pas faire l'économie du consentement du salarié pour de la
   géolocalisation en dehors du cadre strictement professionnel défini
