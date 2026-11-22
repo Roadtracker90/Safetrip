@@ -1,4 +1,4 @@
-// Safetrip Voyageur Tracker — prototype
+// Fretchain Voyageur Tracker — prototype
 //
 // PRINCIPE DE CONCEPTION : ce service ne peut suivre un voyageur que
 // pendant que (a) son appareil est allumé, (b) il a explicitement donné
@@ -82,6 +82,12 @@ async function initSchema() {
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
+
+// Point de contrôle léger (aucune requête base de données) pour un service
+// externe de "ping" anti-veille (ex. UptimeRobot, cron-job.org) — appelé
+// toutes les quelques minutes, ça empêche le plan gratuit Render de mettre
+// le service en veille, donc d'éviter le délai de réveil de 30-60s.
+app.get('/health', (req, res) => res.status(200).send('ok'));
 
 // --- Consentement -----------------------------------------------------
 

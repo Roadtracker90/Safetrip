@@ -1,4 +1,4 @@
-# Safetrip Voyageur Tracker — prototype
+# Fretchain Voyageur Tracker — prototype
 
 Application de suivi de trajets voyageurs **avec consentement explicite**,
 sans capteur matériel à installer dans le véhicule : chaque voyageur
@@ -114,9 +114,42 @@ marqueur bouger sur la carte au fur et à mesure que la position du
 voyageur est mise à jour (déplacez-vous ou simulez la position via les
 outils développeur du navigateur si vous testez depuis un poste fixe).
 
+## Fiabilité sur réseau mobile et plan gratuit Render
+
+Deux soucis observés en test (page qui n'affiche rien sur certains Android,
+écran noir bloqué sur iPhone) et comment ce projet les traite :
+
+- **Mise en veille du plan gratuit Render** : après ~15 minutes sans
+  trafic, le service s'endort et met 30 à 60 secondes à se réveiller à la
+  requête suivante. Pendant ce délai, un navigateur peut afficher un écran
+  vide (noir en mode sombre sur iOS, le temps que la page arrive). Ce
+  n'est pas un bug du code, mais une caractéristique du plan gratuit.
+  **Solution recommandée** : configurer un service externe gratuit
+  (UptimeRobot, cron-job.org) pour appeler `https://votre-service.onrender.com/health`
+  toutes les 5 à 10 minutes — ça garde le service éveillé en permanence.
+  Cette route ne fait aucune requête à la base de données, donc elle
+  répond instantanément même si le reste de l'app est sous tension.
+- **Dépendance à un CDN externe (unpkg.com)** : corrigé. Les fichiers de
+  la bibliothèque de cartes (Leaflet) sont maintenant servis directement
+  par ce serveur (`/vendor/leaflet/`) plutôt que depuis unpkg.com, qui
+  pouvait être lent ou bloqué sur certains réseaux mobiles/opérateurs.
+  Seules les tuiles de carte elles-mêmes (l'image de fond de carte)
+  viennent encore d'OpenStreetMap, un service beaucoup plus largement
+  accessible.
+- **Dégradation progressive** : si la carte ne peut toujours pas se
+  charger (réseau très instable), les 3 pages continuent de fonctionner
+  sans elle — `passenger.html` transmet la position normalement avec un
+  message explicite à la place de la carte, `dashboard.html` garde sa
+  liste latérale à jour, `track.html` affiche les informations du trajet
+  en texte. Avant, une erreur sur la carte pouvait bloquer toute la page.
+- **Premier affichage toujours clair** : un fond clair est maintenant
+  forcé dès le chargement initial (avant même que le CSS complet soit
+  appliqué), pour éviter l'écran noir que montre iOS en mode sombre tant
+  qu'une page n'a encore rien affiché.
+
 ## Conformité et points à traiter avant une mise en production
 
-Ce prototype pose les bases mais, pour un déploiement réel (Safetrip ou
+Ce prototype pose les bases mais, pour un déploiement réel (Fretchain ou
 autre), il reste à traiter :
 
 - **Base légale et CGU définitives** : faire valider le texte de
@@ -125,7 +158,7 @@ autre), il reste à traiter :
   conservation et les destinataires des données.
 - **Authentification** : actuellement, `travelerId` est un identifiant
   simple stocké côté client — à sécuriser (session, token signé, ou
-  compte lié à l'app Safetrip existante) avant toute donnée réelle.
+  compte lié à l'app Fretchain existante) avant toute donnée réelle.
 - **Sauvegardes et plan de reprise** : la persistance PostgreSQL résout la
   perte de données au redémarrage, mais pas une panne de la base
   elle-même — prévoir des sauvegardes régulières (la plupart des
@@ -137,7 +170,7 @@ autre), il reste à traiter :
   positions au-delà de la durée de rétention annoncée (30 jours dans le
   texte de consentement, à ajuster).
 - **Granularité du consentement** : si le produit final vise aussi les
-  chauffeurs/flotte Safetrip plutôt que des passagers, le même schéma
+  chauffeurs/flotte Fretchain plutôt que des passagers, le même schéma
   de consentement explicite s'applique à eux aussi — un employeur ne
   peut pas faire l'économie du consentement du salarié pour de la
   géolocalisation en dehors du cadre strictement professionnel défini

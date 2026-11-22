@@ -2,9 +2,11 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8" />
+<meta name="color-scheme" content="light" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Tableau de bord opérateur — Trajets en direct</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css" media="print" onload="this.media='all'" />
+<noscript><link rel="stylesheet" href="/vendor/leaflet/leaflet.css" /></noscript>
 <style>
   :root { --navy:#0b1f3a; --blue:#1e5ab8; --gold:#d4a72c; }
   body { margin:0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:var(--navy); }
@@ -24,9 +26,9 @@
   .pill { background:var(--gold); color:#3a2c00; border-radius:999px; padding:0.1rem 0.5rem; font-size:0.7rem; }
 </style>
 </head>
-<body>
+<body style="background:#f4f6fa; margin:0;">
 <header>
-  <h1>Safetrip — Trajets voyageurs en direct</h1>
+  <h1>Fretchain — Trajets voyageurs en direct</h1>
   <span class="pill" id="countPill">0 trajet actif</span>
 </header>
 <div id="layout">
@@ -34,13 +36,23 @@
   <div id="sidebar"><div class="empty">En attente de trajets actifs…</div></div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/vendor/leaflet/leaflet.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const map = L.map('map').setView([3.848, 11.502], 7); // Yaoundé par défaut
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap contributors',
-}).addTo(map);
+let map = null;
+try {
+  if (typeof L === 'undefined') throw new Error('Leaflet non chargé');
+  map = L.map('map').setView([3.848, 11.502], 7); // Yaoundé par défaut
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(map);
+} catch (e) {
+  // La carte n'a pas pu se charger (réseau lent/instable) : la liste
+  // latérale continue de fonctionner normalement sans elle.
+  document.getElementById('map').innerHTML =
+    '<div style="padding:1rem; color:#5a6475; font-size:0.9rem;">' +
+    'Carte indisponible (connexion lente ?) — la liste des trajets ci-contre reste à jour.</div>';
+}
 
 const markers = {};   // tripId -> L.marker
 const tripInfo = {};  // tripId -> {displayName, lineLabel, lastSeen}
@@ -106,11 +118,13 @@ socket.on('position:broadcast', (msg) => {
       ${notes ? `<tr><td>Notes</td><td>${escapeHtml(notes)}</td></tr>` : ''}
     </table>`;
 
-  if (markers[tripId]) {
-    markers[tripId].setLatLng([lat, lng]);
-    markers[tripId].setPopupContent(popupHtml);
-  } else {
-    markers[tripId] = L.marker([lat, lng]).addTo(map).bindPopup(popupHtml);
+  if (map) {
+    if (markers[tripId]) {
+      markers[tripId].setLatLng([lat, lng]);
+      markers[tripId].setPopupContent(popupHtml);
+    } else {
+      markers[tripId] = L.marker([lat, lng]).addTo(map).bindPopup(popupHtml);
+    }
   }
   renderSidebar();
 });

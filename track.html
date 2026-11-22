@@ -2,9 +2,11 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8" />
+<meta name="color-scheme" content="light" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Suivi de trajet — Safetrip</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<title>Suivi de trajet — Fretchain</title>
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css" media="print" onload="this.media='all'" />
+<noscript><link rel="stylesheet" href="/vendor/leaflet/leaflet.css" /></noscript>
 <style>
   :root { --navy:#0b1f3a; --blue:#1e5ab8; --gold:#d4a72c; }
   body { margin:0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:var(--navy); }
@@ -24,9 +26,9 @@
   .disclaimer { font-size:0.75rem; color:#5a6475; text-align:center; margin: 0.6rem 1rem 1.4rem; }
 </style>
 </head>
-<body>
+<body style="background:#f4f6fa; margin:0;">
 <header>
-  <h1>Safetrip — Suivi de trajet</h1>
+  <h1>Fretchain — Suivi de trajet</h1>
   <p>Lien de suivi partagé par le voyageur — lecture seule, ce trajet uniquement.</p>
 </header>
 <div id="map"></div>
@@ -38,7 +40,7 @@
 </div>
 <div class="disclaimer">Cette page ne montre que le trajet pour lequel ce lien a été généré. Elle cesse de se mettre à jour dès que le voyageur arrête le partage.</div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/vendor/leaflet/leaflet.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
@@ -47,10 +49,20 @@ const banner = document.getElementById('banner');
 const detailsCard = document.getElementById('detailsCard');
 const detailsTable = document.getElementById('detailsTable');
 
-const map = L.map('map').setView([3.848, 11.502], 6);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap contributors',
-}).addTo(map);
+let map = null;
+try {
+  if (typeof L === 'undefined') throw new Error('Leaflet non chargé');
+  map = L.map('map').setView([3.848, 11.502], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(map);
+} catch (e) {
+  // La carte n'a pas pu se charger (réseau lent/instable) : les
+  // informations du trajet restent affichées normalement ci-dessous.
+  document.getElementById('map').outerHTML =
+    '<div style="padding:1rem; color:#5a6475; font-size:0.85rem; text-align:center;">' +
+    'Carte indisponible (connexion lente ?) — les informations du trajet restent à jour ci-dessous.</div>';
+}
 let marker = null;
 
 function escapeHtml(str) {
@@ -63,9 +75,23 @@ if (!tripId) {
   banner.textContent = "Lien invalide : aucun identifiant de trajet fourni.";
 } else {
   const socket = io();
+  let gotData = false;
+  const diagnosticTimer = setTimeout(() => {
+    if (!gotData) {
+      banner.className = 'banner wait';
+      banner.textContent = "Toujours en attente... la connexion semble lente (le serveur peut mettre jusqu'à une minute à répondre après une période d'inactivité). Patientez ou réessayez.";
+    }
+  }, 20000);
+
   socket.on('connect', () => socket.emit('track:join', { tripId }));
+  socket.on('connect_error', () => {
+    banner.className = 'banner wait';
+    banner.textContent = 'Connexion au serveur en cours (ça peut prendre jusqu\'à une minute après une période d\'inactivité)…';
+  });
 
   socket.on('track:error', () => {
+    gotData = true;
+    clearTimeout(diagnosticTimer);
     banner.className = 'banner ended';
     banner.textContent = "Ce trajet n'est plus disponible (terminé ou consentement retiré par le voyageur).";
   });
@@ -76,6 +102,8 @@ if (!tripId) {
   });
 
   socket.on('position:broadcast', (msg) => {
+    gotData = true;
+    clearTimeout(diagnosticTimer);
     const {
       travelerDisplayName, transportMode, agencyName, originLabel, destinationLabel,
       fareAmount, fareCurrency, vehiclePlate, seatNumber, scheduledDepartureAt, notes,
@@ -85,11 +113,13 @@ if (!tripId) {
     banner.className = 'banner live';
     banner.textContent = `Position en direct — mise à jour à ${new Date(recordedAt).toLocaleTimeString('fr-FR')}`;
 
-    if (marker) {
-      marker.setLatLng([lat, lng]);
-    } else {
-      marker = L.marker([lat, lng]).addTo(map);
-      map.setView([lat, lng], 12);
+    if (map) {
+      if (marker) {
+        marker.setLatLng([lat, lng]);
+      } else {
+        marker = L.marker([lat, lng]).addTo(map);
+        map.setView([lat, lng], 12);
+      }
     }
 
     const rows = [
