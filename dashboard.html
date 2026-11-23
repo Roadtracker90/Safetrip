@@ -5,8 +5,8 @@
 <meta name="color-scheme" content="light" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Tableau de bord opérateur — Trajets en direct</title>
-<link rel="stylesheet" href="/vendor/leaflet/leaflet.css" media="print" onload="this.media='all'" />
-<noscript><link rel="stylesheet" href="/vendor/leaflet/leaflet.css" /></noscript>
+<link rel="stylesheet" href="/leaflet.css" media="print" onload="this.media='all'" />
+<noscript><link rel="stylesheet" href="/leaflet.css" /></noscript>
 <style>
   :root { --navy:#0b1f3a; --blue:#1e5ab8; --gold:#d4a72c; }
   body { margin:0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:var(--navy); }
@@ -63,7 +63,19 @@
   <div id="sidebar"><div class="empty">En attente de trajets actifs…</div></div>
 </div>
 
-<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/leaflet.js"></script>
+<script>
+  // Les images d'icônes Leaflet sont à la racine du site (pas de sous-dossier) :
+  // on l'indique explicitement pour que les marqueurs s'affichent correctement.
+  if (typeof L !== 'undefined') {
+    delete L.Icon.Default.prototype._getIconUrl;
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl: '/marker-icon-2x.png',
+      iconUrl: '/marker-icon.png',
+      shadowUrl: '/marker-shadow.png',
+    });
+  }
+</script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
 let map = null;

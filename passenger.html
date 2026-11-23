@@ -5,8 +5,8 @@
 <meta name="color-scheme" content="light" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Partage de trajet — Voyageur</title>
-<link rel="stylesheet" href="/vendor/leaflet/leaflet.css" media="print" onload="this.media='all'" />
-<noscript><link rel="stylesheet" href="/vendor/leaflet/leaflet.css" /></noscript>
+<link rel="stylesheet" href="/leaflet.css" media="print" onload="this.media='all'" />
+<noscript><link rel="stylesheet" href="/leaflet.css" /></noscript>
 <style>
   #selfMap { height: 260px; border-radius: 10px; margin-top: 0.8rem; display:none; background:#e9edf3; }
   #selfMapHint { display:none; font-size:0.8rem; color:#5a6475; margin-top:0.4rem; text-align:center; }
@@ -163,7 +163,19 @@
 
 </main>
 
-<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/leaflet.js"></script>
+<script>
+  // Les images d'icônes Leaflet sont à la racine du site (pas de sous-dossier) :
+  // on l'indique explicitement pour que les marqueurs s'affichent correctement.
+  if (typeof L !== 'undefined') {
+    delete L.Icon.Default.prototype._getIconUrl;
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl: '/marker-icon-2x.png',
+      iconUrl: '/marker-icon.png',
+      shadowUrl: '/marker-shadow.png',
+    });
+  }
+</script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const consentCheckbox = document.getElementById('consentCheckbox');
