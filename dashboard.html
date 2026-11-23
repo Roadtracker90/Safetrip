@@ -5,6 +5,8 @@
 <meta name="color-scheme" content="light" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Tableau de bord opérateur — Trajets en direct</title>
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#0b1f3a" />
 <link rel="stylesheet" href="/leaflet.css" media="print" onload="this.media='all'" />
 <noscript><link rel="stylesheet" href="/leaflet.css" /></noscript>
 <style>
@@ -24,6 +26,17 @@
   .popup-table td:first-child { color:#5a6475; padding-right:0.6rem; vertical-align:top; }
   .empty { padding:1rem; color:#5a6475; font-size:0.9rem; }
   .pill { background:var(--gold); color:#3a2c00; border-radius:999px; padding:0.1rem 0.5rem; font-size:0.7rem; }
+  #soundBtn { background:#fff; border:1px solid #c7d2e8; color:var(--navy); border-radius:999px; padding:0.25rem 0.7rem; font-size:0.75rem; cursor:pointer; margin-right:0.5rem; }
+  #soundBtn.on { background:#17643a; color:#fff; border-color:#17643a; }
+  .trip-item.alert { background:#fdecec; border-left:4px solid #b8341e; }
+  @keyframes pulseAlert { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
+  .trip-item.alert .alertLabel { color:#8a1f1f; font-weight:700; animation: pulseAlert 1.3s infinite; display:block; margin-bottom:0.2rem; }
+  .clearAlertBtn { margin-top:0.4rem; background:#8a1f1f; color:#fff; border:none; border-radius:6px; padding:0.3rem 0.6rem; font-size:0.75rem; cursor:pointer; }
+  #pushBtn { background:#fff; border:1px solid #c7d2e8; color:var(--navy); border-radius:999px; padding:0.25rem 0.7rem; font-size:0.75rem; cursor:pointer; margin-right:0.5rem; }
+  #pushBtn.on { background:#1e5ab8; color:#fff; border-color:#1e5ab8; }
+  .trip-item.signalLost { background:#fff6e5; border-left:4px solid #b8860b; }
+  .trip-item.signalLost .signalLabel { color:#8a5a00; font-weight:700; display:block; margin-bottom:0.2rem; }
+  .vehicleWarning { color:#b8860b; font-weight:600; }
 </style>
 </head>
 <body style="background:#f4f6fa; margin:0;">
@@ -56,7 +69,11 @@
 </script>
 <header>
   <h1>Safetrip — Trajets voyageurs en direct</h1>
-  <span class="pill" id="countPill">0 trajet actif</span>
+  <div>
+    <button id="pushBtn">🔔 Activer les notifications</button>
+    <button id="soundBtn">🔈 Activer le son d'alerte</button>
+    <span class="pill" id="countPill">0 trajet actif</span>
+  </div>
 </header>
 <div id="layout">
   <div id="map"></div>
@@ -78,6 +95,11 @@
 </script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
+// Jeton injecté par le serveur quand cette page est servie avec succès
+// (après authentification Basic si un mot de passe opérateur est configuré).
+// Vide/placeholder si le fichier est ouvert autrement qu'via le serveur.
+const OPERATOR_TOKEN = '__OPERATOR_TOKEN__';
+
 let map = null;
 try {
   if (typeof L === 'undefined') throw new Error('Leaflet non chargé');
@@ -93,13 +115,102 @@ try {
     'Carte indisponible (connexion lente ?) — la liste des trajets ci-contre reste à jour.</div>';
 }
 
-const markers = {};   // tripId -> L.marker
-const tripInfo = {};  // tripId -> {displayName, lineLabel, lastSeen}
+const markers = {};        // tripId -> L.marker
+const alertCircles = {};   // tripId -> L.circle (halo rouge autour du marqueur en alerte)
+const tripInfo = {};       // tripId -> {displayName, lineLabel, lastSeen, alertActive, lastAlertAt}
 const sidebar = document.getElementById('sidebar');
 const countPill = document.getElementById('countPill');
+const soundBtn = document.getElementById('soundBtn');
+
+// --- Son d'alerte --------------------------------------------------------
+// Les navigateurs bloquent tout son avant un premier geste de l'utilisateur :
+// l'opérateur doit cliquer une fois sur "Activer le son" pour le débloquer.
+let audioCtx = null;
+let soundEnabled = false;
+soundBtn.addEventListener('click', () => {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume();
+  soundEnabled = !soundEnabled;
+  soundBtn.classList.toggle('on', soundEnabled);
+  soundBtn.textContent = soundEnabled ? '🔊 Son activé' : '🔈 Activer le son d\'alerte';
+  if (soundEnabled) playAlertSound();
+});
+
+// --- Notifications push ---------------------------------------------------
+// Permet d'être alerté même dashboard fermé ou téléphone verrouillé, à
+// condition d'avoir installé la page ("Ajouter à l'écran d'accueil") —
+// requis par iOS/Safari (16.4+) pour autoriser les notifications web du
+// tout ; Android/Chrome les autorise aussi depuis un simple onglet.
+const pushBtn = document.getElementById('pushBtn');
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+async function initPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    pushBtn.style.display = 'none';
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) {
+      pushBtn.classList.add('on');
+      pushBtn.textContent = '🔔 Notifications activées';
+    }
+  } catch (e) {
+    pushBtn.style.display = 'none';
+  }
+}
+initPush();
+
+pushBtn.addEventListener('click', async () => {
+  try {
+    const { enabled, publicKey } = await (await fetch('/api/push/public-key')).json();
+    if (!enabled) {
+      alert("Les notifications push ne sont pas configurées sur ce serveur pour l'instant.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sub),
+    });
+    pushBtn.classList.add('on');
+    pushBtn.textContent = '🔔 Notifications activées';
+  } catch (e) {
+    alert("Impossible d'activer les notifications sur cet appareil/navigateur.");
+  }
+});
+
+function playAlertSound() {
+  if (!soundEnabled || !audioCtx) return;
+  const now = audioCtx.currentTime;
+  [0, 0.35].forEach((offset) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, now + offset);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.3);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now + offset);
+    osc.stop(now + offset + 0.3);
+  });
+}
 
 function renderSidebar() {
-  const ids = Object.keys(tripInfo);
+  const ids = Object.keys(tripInfo).sort((a, b) => (tripInfo[b].alertActive ? 1 : 0) - (tripInfo[a].alertActive ? 1 : 0));
   countPill.textContent = `${ids.length} trajet${ids.length > 1 ? 's' : ''} actif${ids.length > 1 ? 's' : ''}`;
   if (ids.length === 0) {
     sidebar.innerHTML = '<div class="empty">En attente de trajets actifs…</div>';
@@ -108,15 +219,42 @@ function renderSidebar() {
   sidebar.innerHTML = ids.map((id) => {
     const t = tripInfo[id];
     const fare = t.fareAmount != null ? `${t.fareAmount.toLocaleString('fr-FR')} ${t.fareCurrency || ''}` : null;
-    return `<div class="trip-item">
+    const cls = t.alertActive ? ' alert' : (t.signalLost ? ' signalLost' : '');
+    return `<div class="trip-item${cls}">
+      ${t.alertActive ? `<span class="alertLabel">🆘 ALERTE — ${new Date(t.lastAlertAt).toLocaleTimeString('fr-FR')}</span>` : ''}
+      ${!t.alertActive && t.signalLost ? `<span class="signalLabel">⚠️ Signal perdu depuis ${t.signalLostMinutes || '?'} min</span>` : ''}
       <strong>${escapeHtml(t.displayName)}</strong>
       <div class="meta">${escapeHtml(t.transportMode || 'Transport non précisé')}${t.agencyName ? ' · ' + escapeHtml(t.agencyName) : ''}</div>
       <div class="route"><b>${escapeHtml(t.originLabel || '?')}</b> → <b>${escapeHtml(t.destinationLabel || '?')}</b></div>
       ${fare ? `<div class="meta">Coût payé : ${fare}</div>` : ''}
       ${t.vehiclePlate ? `<div class="meta">Véhicule : ${escapeHtml(t.vehiclePlate)}${t.seatNumber ? ' · siège ' + escapeHtml(t.seatNumber) : ''}</div>` : ''}
+      ${t.vehicleAlertCount > 0 ? `<div class="meta vehicleWarning">⚠️ Ce véhicule a ${t.vehicleAlertCount} alerte(s) antérieure(s)</div>` : ''}
       <div class="meta">Vu à ${new Date(t.lastSeen).toLocaleTimeString('fr-FR')}</div>
+      ${t.alertActive ? `<button class="clearAlertBtn" data-trip="${id}">Marquer comme traité</button>` : ''}
     </div>`;
   }).join('');
+
+  sidebar.querySelectorAll('.clearAlertBtn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await fetch(`/api/trips/${btn.dataset.trip}/alert/clear`, { method: 'POST' });
+    });
+  });
+}
+
+function setAlertCircle(tripId, lat, lng, active) {
+  if (!map) return;
+  if (active) {
+    if (alertCircles[tripId]) {
+      alertCircles[tripId].setLatLng([lat, lng]);
+    } else {
+      alertCircles[tripId] = L.circle([lat, lng], {
+        radius: 60, color: '#b8341e', weight: 3, fillColor: '#b8341e', fillOpacity: 0.25,
+      }).addTo(map);
+    }
+  } else if (alertCircles[tripId]) {
+    map.removeLayer(alertCircles[tripId]);
+    delete alertCircles[tripId];
+  }
 }
 
 function escapeHtml(str) {
@@ -129,14 +267,18 @@ function escapeHtml(str) {
 }
 
 const socket = io();
-socket.emit('dashboard:join');
+socket.on('connect', () => socket.emit('dashboard:join', { token: OPERATOR_TOKEN }));
+socket.on('dashboard:unauthorized', () => {
+  document.body.innerHTML = '<div style="padding:2rem; font-family:sans-serif; color:#8a1f1f;">' +
+    'Session expirée ou non autorisée. Rechargez la page (Ctrl+F5) et ressaisissez le mot de passe opérateur si demandé.</div>';
+});
 
 socket.on('position:broadcast', (msg) => {
   const {
     tripId, travelerDisplayName, lineLabel, transportMode, agencyName,
     originLabel, destinationLabel, fareAmount, fareCurrency,
     vehiclePlate, seatNumber, scheduledDepartureAt, notes,
-    lat, lng, recordedAt,
+    lat, lng, recordedAt, alertActive, lastAlertAt, vehicleAlertCount,
   } = msg;
 
   tripInfo[tripId] = {
@@ -144,7 +286,12 @@ socket.on('position:broadcast', (msg) => {
     originLabel, destinationLabel, fareAmount, fareCurrency,
     vehiclePlate, seatNumber, scheduledDepartureAt, notes,
     lastSeen: recordedAt,
+    alertActive: !!alertActive,
+    lastAlertAt: lastAlertAt || (tripInfo[tripId] && tripInfo[tripId].lastAlertAt) || null,
+    vehicleAlertCount: vehicleAlertCount || 0,
+    signalLost: false,
   };
+  setAlertCircle(tripId, lat, lng, !!alertActive);
 
   const popupHtml = `
     <strong>${escapeHtml(travelerDisplayName)}</strong>
@@ -165,6 +312,40 @@ socket.on('position:broadcast', (msg) => {
       markers[tripId] = L.marker([lat, lng]).addTo(map).bindPopup(popupHtml);
     }
   }
+  renderSidebar();
+});
+
+socket.on('trip:alert', ({ tripId, travelerDisplayName, lat, lng, at }) => {
+  if (!tripInfo[tripId]) {
+    tripInfo[tripId] = { displayName: travelerDisplayName, lastSeen: at };
+  }
+  tripInfo[tripId].alertActive = true;
+  tripInfo[tripId].lastAlertAt = at;
+  if (lat != null && lng != null) setAlertCircle(tripId, lat, lng, true);
+  else if (markers[tripId]) {
+    const ll = markers[tripId].getLatLng();
+    setAlertCircle(tripId, ll.lat, ll.lng, true);
+  }
+  playAlertSound();
+  renderSidebar();
+});
+
+socket.on('trip:alert:cleared', ({ tripId }) => {
+  if (tripInfo[tripId]) tripInfo[tripId].alertActive = false;
+  setAlertCircle(tripId, 0, 0, false);
+  renderSidebar();
+});
+
+socket.on('trip:signal_lost', ({ tripId, travelerDisplayName, silentForMinutes }) => {
+  if (!tripInfo[tripId]) tripInfo[tripId] = { displayName: travelerDisplayName, lastSeen: Date.now() };
+  tripInfo[tripId].signalLost = true;
+  tripInfo[tripId].signalLostMinutes = silentForMinutes;
+  playAlertSound();
+  renderSidebar();
+});
+
+socket.on('trip:signal_restored', ({ tripId }) => {
+  if (tripInfo[tripId]) tripInfo[tripId].signalLost = false;
   renderSidebar();
 });
 </script>

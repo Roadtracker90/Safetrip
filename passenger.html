@@ -31,6 +31,12 @@
   .status.off { background:#fdecec; color:#8a1f1f; }
   .badge { display:inline-block; background:var(--gold); color:#3a2c00; font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px; margin-left:0.4rem; }
   .hint { font-size:0.78rem; color:#5a6475; margin-top:0.6rem; }
+  #sosBtn { position:relative; width:100%; margin-top:0.9rem; padding:0.9rem; background:#b8341e; color:#fff; border:none; border-radius:10px; font-size:1rem; font-weight:700; letter-spacing:0.02em; overflow:hidden; display:none; }
+  #sosBtn .fill { position:absolute; left:0; top:0; bottom:0; width:0%; background:rgba(255,255,255,0.35); }
+  #sosBtn span { position:relative; }
+  #sosStatus { display:none; margin-top:0.6rem; padding:0.6rem 0.8rem; border-radius:8px; background:#fdecec; color:#8a1f1f; font-size:0.85rem; font-weight:600; }
+  @keyframes pulseAlert { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
+  #sosStatus.active { animation: pulseAlert 1.4s infinite; }
 </style>
 </head>
 <body style="background:#f4f6fa; margin:0;">
@@ -63,7 +69,7 @@
   });
 })();
 </script>
-<header><h1>Safetrip — Partage de trajet voyageur</h1></header>
+<header id="appHeader"><h1>Safetrip — Partage de trajet voyageur</h1></header>
 <main>
 
   <section id="consentCard" class="card">
@@ -143,17 +149,25 @@
     <label class="field-label">Notes (bagages, contact d'urgence, etc.)</label>
     <input type="text" id="notes" placeholder="Facultatif" />
 
+    <label class="field-label">Contact de confiance (numéro WhatsApp)</label>
+    <input type="text" id="trustedContact" inputmode="tel" placeholder="Ex : 690000000 (sans le +237, ou avec)" />
+
     <div class="hint" style="margin:0.4rem 0 0.8rem;">* Champs nécessaires pour que le suivi ait un sens : le dashboard de l'opérateur en a besoin pour identifier correctement votre trajet.</div>
 
     <button id="startBtn">Démarrer le partage</button>
     <button id="stopBtn" class="secondary" disabled>Arrêter le partage</button>
     <div class="hint">Le partage s'arrête automatiquement si vous fermez cette page, verrouillez un appareil très ancien en veille profonde, ou perdez la connexion. Il ne continue jamais en arrière-plan à votre insu.</div>
 
+    <button id="sosBtn"><div class="fill"></div><span>🆘 Maintenir 1 seconde pour alerter</span></button>
+    <div id="sosStatus"></div>
+    <div class="hint">En cas de danger, maintenez le bouton rouge appuyé. Un signalement part immédiatement vers l'opérateur et vers toute personne ayant votre lien de suivi, avec votre position.</div>
+
     <div id="shareBox" style="display:none; margin-top:1rem; padding-top:1rem; border-top:1px solid #eee;">
       <label class="field-label">Lien de suivi à partager avec un proche</label>
       <input type="text" id="shareLink" readonly style="margin-bottom:0.5rem;" />
       <button id="copyLinkBtn" class="secondary">Copier le lien</button>
       <button id="shareBtn" style="display:none;">Partager…</button>
+      <button id="whatsappBtn" class="secondary" style="display:none; margin-left:0.4rem;">📲 Envoyer au contact de confiance (WhatsApp)</button>
       <div class="hint">Toute personne ayant ce lien peut voir ce trajet en direct, sans se connecter — ne le partagez qu'avec des personnes de confiance. Il cesse de fonctionner dès que vous arrêtez le partage.</div>
     </div>
 
@@ -197,10 +211,34 @@ const vehiclePlateInput = document.getElementById('vehiclePlate');
 const seatNumberInput = document.getElementById('seatNumber');
 const scheduledDepartureAtInput = document.getElementById('scheduledDepartureAt');
 const notesInput = document.getElementById('notes');
+const trustedContactInput = document.getElementById('trustedContact');
 const shareBox = document.getElementById('shareBox');
 const shareLinkInput = document.getElementById('shareLink');
 const copyLinkBtn = document.getElementById('copyLinkBtn');
 const shareBtn = document.getElementById('shareBtn');
+const whatsappBtn = document.getElementById('whatsappBtn');
+
+// Le contact de confiance est ressaisi une fois puis mémorisé sur cet
+// appareil, pour ne pas le redemander à chaque trajet.
+trustedContactInput.value = localStorage.getItem('trustedContact') || '';
+trustedContactInput.addEventListener('input', () => {
+  localStorage.setItem('trustedContact', trustedContactInput.value.trim());
+});
+
+function trustedContactDigits() {
+  // wa.me et sms: attendent un numéro international sans espaces/signes.
+  // Si l'utilisateur n'a saisi que le numéro local, on suppose l'indicatif
+  // du Cameroun (+237) par défaut — ajustable en saisissant le + soi-même.
+  const raw = trustedContactInput.value.trim();
+  if (!raw) return null;
+  const digits = raw.replace(/[^\d+]/g, '');
+  if (digits.startsWith('+')) return digits.slice(1);
+  if (digits.startsWith('237')) return digits;
+  return '237' + digits.replace(/^0+/, '');
+}
+const sosBtn = document.getElementById('sosBtn');
+const sosFill = sosBtn.querySelector('.fill');
+const sosStatus = document.getElementById('sosStatus');
 
 let travelerId = localStorage.getItem('travelerId') || null;
 let tripId = null;
@@ -211,6 +249,8 @@ const selfMapEl = document.getElementById('selfMap');
 const selfMapHint = document.getElementById('selfMapHint');
 let selfMap = null;
 let selfMarker = null;
+let lastLat = null;
+let lastLng = null;
 
 function showMapHint(text) {
   selfMapHint.textContent = text;
@@ -330,8 +370,12 @@ startBtn.addEventListener('click', async () => {
   const shareUrl = `${location.origin}/track.html?trip=${tripId}`;
   shareLinkInput.value = shareUrl;
   shareBox.style.display = 'block';
+  sosBtn.style.display = 'block';
   if (navigator.share) {
     shareBtn.style.display = 'inline-block';
+  }
+  if (trustedContactDigits()) {
+    whatsappBtn.style.display = 'inline-block';
   }
 
   let gotFirstPosition = false;
@@ -345,6 +389,8 @@ startBtn.addEventListener('click', async () => {
     (pos) => {
       gotFirstPosition = true;
       clearTimeout(diagnosticTimer);
+      lastLat = pos.coords.latitude;
+      lastLng = pos.coords.longitude;
       socket.emit('position:update', {
         tripId,
         lat: pos.coords.latitude,
@@ -378,6 +424,9 @@ async function stopSharing() {
    fareAmountInput, fareCurrencyInput, vehiclePlateInput, seatNumberInput,
    scheduledDepartureAtInput, notesInput].forEach((el) => { el.disabled = false; });
   shareBox.style.display = 'none';
+  whatsappBtn.style.display = 'none';
+  sosBtn.style.display = 'none';
+  sosStatus.style.display = 'none';
   selfMapEl.style.display = 'none';
   showMapHint('');
 }
@@ -403,9 +452,130 @@ shareBtn.addEventListener('click', () => {
   }).catch(() => {});
 });
 
+whatsappBtn.addEventListener('click', () => {
+  const digits = trustedContactDigits();
+  if (!digits) return;
+  const text = encodeURIComponent(
+    `Je démarre un trajet avec Safetrip. Vous pouvez suivre ma position en direct ici : ${shareLinkInput.value}`
+  );
+  window.open(`https://wa.me/${digits}?text=${text}`, '_blank');
+});
+
 window.addEventListener('beforeunload', () => {
   if (tripId) {
     navigator.sendBeacon(`/api/trips/${tripId}/end`);
+  }
+});
+
+// --- Bouton d'alerte d'urgence -----------------------------------------
+// Appui maintenu ~900ms (pas un simple tap, pour éviter un déclenchement
+// accidentel en rangeant le téléphone) : envoie immédiatement la dernière
+// position connue au dashboard opérateur et à toute personne ayant le
+// lien de partage. Peut être redéclenché autant de fois que nécessaire.
+const HOLD_MS = 900;
+let holdTimer = null;
+let holdStart = null;
+let holdFrame = null;
+
+function cancelHold() {
+  if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  if (holdFrame) { cancelAnimationFrame(holdFrame); holdFrame = null; }
+  sosFill.style.width = '0%';
+}
+
+function tickHold() {
+  if (!holdStart) return;
+  const pct = Math.min(100, ((Date.now() - holdStart) / HOLD_MS) * 100);
+  sosFill.style.width = pct + '%';
+  if (pct < 100) holdFrame = requestAnimationFrame(tickHold);
+}
+
+async function sendAlert(discreet) {
+  if (navigator.vibrate) navigator.vibrate(discreet ? [120] : [200, 100, 200, 100, 400]);
+
+  // Secours sans connexion data : un lien "sms:" ouvre l'app SMS native du
+  // téléphone, pré-remplie, à envoyer d'un tap — ça fonctionne par simple
+  // réseau cellulaire (2G compris) même quand le reste de l'app ne peut
+  // joindre le serveur. Déclenché tout de suite, dans le même geste de
+  // l'utilisateur (nécessaire pour ne pas être bloqué par le navigateur),
+  // avec la dernière position connue (une position fraîche sera envoyée au
+  // serveur séparément dès que possible).
+  const digits = trustedContactDigits();
+  if (digits) {
+    const mapsLink = (lastLat != null && lastLng != null)
+      ? `https://maps.google.com/?q=${lastLat},${lastLng}`
+      : '(position non disponible)';
+    const smsBody = encodeURIComponent(`SAFETRIP - ALERTE : j'ai besoin d'aide. Dernière position : ${mapsLink}`);
+    window.open(`sms:+${digits}?body=${smsBody}`, '_blank');
+  }
+
+  if (!discreet) {
+    sosStatus.style.display = 'block';
+    sosStatus.classList.add('active');
+    sosStatus.textContent = '🆘 Envoi de l\'alerte en cours…';
+  }
+
+  const sendWith = async (lat, lng) => {
+    try {
+      await fetch(`/api/trips/${tripId}/alert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat, lng }),
+      });
+      if (!discreet) {
+        const now = new Date();
+        sosStatus.textContent = '🆘 Alerte envoyée à ' + now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) + ' — l\'opérateur et vos proches avec le lien ont été notifiés.';
+      }
+    } catch (e) {
+      if (!discreet) {
+        sosStatus.textContent = 'Échec de l\'envoi en ligne (connexion ?). Le SMS de secours reste disponible si un contact de confiance est renseigné.';
+        sosStatus.classList.remove('active');
+      }
+    }
+  };
+
+  if (lastLat != null && lastLng != null) {
+    sendWith(lastLat, lastLng);
+  } else if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => sendWith(pos.coords.latitude, pos.coords.longitude),
+      () => sendWith(null, null),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
+    );
+  } else {
+    sendWith(null, null);
+  }
+}
+
+sosBtn.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  holdStart = Date.now();
+  tickHold();
+  holdTimer = setTimeout(() => {
+    cancelHold();
+    sendAlert();
+  }, HOLD_MS);
+});
+['pointerup', 'pointerleave', 'pointercancel'].forEach((evt) => {
+  sosBtn.addEventListener(evt, () => { holdStart = null; cancelHold(); });
+});
+
+// --- Déclenchement discret -----------------------------------------------
+// Un bouton rouge bien visible peut mettre un agresseur en alerte. Trois
+// appuis rapprochés sur le titre en haut de page déclenchent la même
+// alerte, sans aucun changement visuel ni son — seule une brève vibration
+// confirme l'envoi (silencieuse si le téléphone est en mode silencieux de
+// toute façon, et imperceptible pour quelqu'un d'autre).
+const appHeader = document.getElementById('appHeader');
+let tapTimes = [];
+appHeader.addEventListener('click', () => {
+  if (!tripId) return; // seulement pendant un trajet actif
+  const now = Date.now();
+  tapTimes = tapTimes.filter((t) => now - t < 1500);
+  tapTimes.push(now);
+  if (tapTimes.length >= 3) {
+    tapTimes = [];
+    sendAlert(true);
   }
 });
 

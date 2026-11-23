@@ -131,8 +131,13 @@ Deux soucis observés en test (page qui n'affiche rien sur certains Android,
   répond instantanément même si le reste de l'app est sous tension.
 - **Dépendance à un CDN externe (unpkg.com)** : corrigé. Les fichiers de
   la bibliothèque de cartes (Leaflet) sont maintenant servis directement
-  par ce serveur (`/vendor/leaflet/`) plutôt que depuis unpkg.com, qui
-  pouvait être lent ou bloqué sur certains réseaux mobiles/opérateurs.
+  par ce serveur, à la racine du site (`/leaflet.js`, `/leaflet.css`,
+  `/marker-icon.png`, etc. — pas de sous-dossier, car l'envoi de dossiers
+  imbriqués via l'interface web de GitHub ("Add file > Upload files")
+  s'est révélé peu fiable : un envoi en `vendor/leaflet/` a fini aplati
+  à la racine, cassant les chemins. Un envoi à plat évite ce risque),
+  plutôt que depuis unpkg.com, qui pouvait être lent ou bloqué sur
+  certains réseaux mobiles/opérateurs.
   Seules les tuiles de carte elles-mêmes (l'image de fond de carte)
   viennent encore d'OpenStreetMap, un service beaucoup plus largement
   accessible.
@@ -178,3 +183,118 @@ autre), il reste à traiter :
 - **Export/suppression sur demande** : prévoir un point d'accès pour
   qu'un voyageur obtienne ou efface son historique, au-delà de la simple
   révocation du partage futur.
+
+## Bouton d'alerte d'urgence
+
+Pendant un trajet actif, `passenger.html` affiche un bouton rouge
+"🆘 Maintenir 1 seconde pour alerter". Un appui maintenu (~0,9s, pour
+éviter un déclenchement accidentel) envoie immédiatement :
+
+- la dernière position connue du voyageur,
+- vers `dashboard.html` (l'opérateur voit le trajet remonté en tête de
+  liste, surligné en rouge, avec un halo rouge autour du marqueur sur
+  la carte, et un signal sonore si l'opérateur a cliqué une fois sur
+  "Activer le son" — les navigateurs bloquent tout son avant un geste
+  explicite de l'utilisateur),
+- vers `track.html` (toute personne ayant le lien de suivi voit une
+  bannière rouge "🆘 ALERTE" apparaître immédiatement, avec vibration
+  si l'appareil le permet).
+
+L'alerte reste active jusqu'à ce que l'opérateur clique sur "Marquer
+comme traité" dans le dashboard ; le voyageur peut redéclencher une
+nouvelle alerte à tout moment, y compris pendant qu'une alerte
+précédente est encore active. Chaque déclenchement est journalisé
+dans la table `alerts` (position, horodatage, et horodatage de
+traitement) pour un historique a posteriori.
+
+Un déclenchement **discret** existe aussi : pendant un trajet actif, 3
+appuis rapprochés (moins de 1,5s) sur le titre en haut de la page
+déclenchent la même alerte, sans bouton rouge visible ni texte à
+l'écran — seule une courte vibration confirme l'envoi. Utile si
+afficher un bouton "Alerte" serait lui-même dangereux face à
+l'agresseur.
+
+**Secours sans connexion data** : si un "Contact de confiance" (numéro
+WhatsApp) est renseigné sur la fiche de trajet, chaque déclenchement
+d'alerte ouvre aussi, en parallèle de l'envoi au serveur, l'application
+SMS native du téléphone avec un message pré-rempli (position en lien
+Google Maps) adressé à ce contact — il suffit d'appuyer sur "Envoyer".
+Un SMS part par le simple réseau cellulaire (2G compris), donc même
+sans connexion internet. C'est une limite du web mobile (impossible
+d'envoyer un SMS sans confirmation de l'utilisateur) plutôt qu'un choix
+de conception : gardez-le en tête en formant les voyageurs.
+
+## Contact de confiance et partage automatique
+
+Le même numéro "Contact de confiance" permet d'envoyer le lien de
+suivi par WhatsApp en un tap, dès le démarrage du trajet, via le
+bouton "📲 Envoyer au contact de confiance (WhatsApp)" — plus fiable
+que de compter sur le bouton "Partager…" générique à chaque trajet.
+Le numéro est mémorisé sur l'appareil (pas sur le serveur) pour ne
+pas le ressaisir à chaque fois.
+
+## Détection automatique de perte de signal
+
+Un trajet actif qui ne transmet plus aucune position depuis 5 minutes
+(réglable via `SIGNAL_LOST_MINUTES`) est automatiquement signalé —
+sans action du voyageur — au dashboard opérateur et au lien de
+partage, avec un bandeau orange distinct de l'alerte manuelle (rouge).
+Complète le bouton d'urgence pour les cas où le voyageur ne peut
+justement plus agir (téléphone déchargé, zone sans réseau...). Le
+signal repart automatiquement dès qu'une nouvelle position arrive.
+
+## Historique des incidents par véhicule
+
+Quand un voyageur saisit une immatriculation, le serveur compte
+automatiquement les alertes déjà déclenchées sur d'autres trajets
+ayant utilisé la même plaque et l'affiche à l'opérateur et sur le
+lien de partage ("⚠️ Ce véhicule a N alerte(s) antérieure(s)") — un
+signal de sécurité collective qui se construit avec l'usage.
+
+## Protection du dashboard opérateur
+
+Si la variable d'environnement `OPERATOR_PASSWORD` est définie sur
+Render, `dashboard.html` demande un nom d'utilisateur (indifférent) et
+ce mot de passe avant de s'afficher (authentification Basic du
+navigateur). Sans cette variable, le dashboard reste ouvert comme
+avant — à définir dès que possible puisqu'il affiche maintenant des
+données d'alerte sensibles.
+
+## Notifications push sur le dashboard
+
+Pour être notifié même dashboard fermé (ou téléphone verrouillé),
+l'opérateur peut cliquer sur "🔔 Activer les notifications" (une fois
+le téléphone/ordinateur ajouté à l'écran d'accueil — obligatoire sur
+iPhone/Safari depuis iOS 16.4, pas nécessaire sur Android/Chrome).
+Ceci nécessite deux variables d'environnement sur Render,
+**générées une seule fois et à garder stables** (elles ne doivent pas
+changer à chaque redéploiement, sinon les abonnements existants
+deviennent invalides) :
+
+```
+VAPID_PUBLIC_KEY=BDc1WbhaT-tv3lDvlHd8kHSADc5QU6l5Pk5OMwtQKeclj01MwJ3lZCa8aPA0ipB9g7f3lpabcOeAbj1W3kA4_Iw
+VAPID_PRIVATE_KEY=ikd7DuWuSRrsBQEiSz88Kbl-Gy99mcRzCv3g-uzPvrU
+VAPID_SUBJECT=mailto:votre-email@exemple.com
+```
+
+(Ces clés sont gratuites — générées localement, aucun compte tiers
+requis. Si vous préférez les régénérer vous-même : `npx web-push
+generate-vapid-keys`.) Sans ces variables, les boutons liés aux
+notifications restent inactifs mais le reste de l'application
+fonctionne normalement.
+
+## Rétention des données (appliquée)
+
+Conformément au texte de consentement, un trajet terminé depuis plus
+de 30 jours (réglable via le code, `RETENTION_DAYS` dans
+`server.js`) est maintenant automatiquement supprimé avec ses
+positions et alertes, via une purge qui tourne une fois par jour.
+
+## Variables d'environnement (récapitulatif)
+
+| Variable | Obligatoire | Effet |
+|---|---|---|
+| `DATABASE_URL` | Oui | Connexion PostgreSQL |
+| `OPERATOR_PASSWORD` | Non | Protège `dashboard.html` par mot de passe |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | Non | Active les notifications push du dashboard |
+| `SIGNAL_LOST_MINUTES` | Non (défaut 5) | Délai avant de signaler un trajet silencieux |

@@ -23,6 +23,10 @@
   .banner.live { background:#e7f7ec; color:#17643a; }
   .banner.ended { background:#fdecec; color:#8a1f1f; }
   .banner.wait { background:#eef4ff; color:#1e3a6b; }
+  .banner.alert { background:#b8341e; color:#fff; font-weight:700; }
+  @keyframes pulseAlert { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+  .banner.alert.pulsing { animation: pulseAlert 1.3s infinite; }
+  .banner.signalLost { background:#fff6e5; color:#8a5a00; font-weight:600; }
   .disclaimer { font-size:0.75rem; color:#5a6475; text-align:center; margin: 0.6rem 1rem 1.4rem; }
 </style>
 </head>
@@ -60,6 +64,8 @@
 </header>
 <div id="map"></div>
 <div id="info">
+  <div id="alertBanner" class="banner alert pulsing" style="display:none;"></div>
+  <div id="signalBanner" class="banner signalLost" style="display:none;"></div>
   <div id="banner" class="banner wait">En attente de données de position…</div>
   <div class="card" id="detailsCard" style="display:none;">
     <table id="detailsTable"></table>
@@ -85,8 +91,18 @@
 const params = new URLSearchParams(location.search);
 const tripId = params.get('trip');
 const banner = document.getElementById('banner');
+const alertBanner = document.getElementById('alertBanner');
 const detailsCard = document.getElementById('detailsCard');
 const detailsTable = document.getElementById('detailsTable');
+
+function showAlert(at) {
+  alertBanner.style.display = 'block';
+  alertBanner.textContent = '🆘 ALERTE — le voyageur a signalé un danger à ' + new Date(at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  if (navigator.vibrate) navigator.vibrate([250, 100, 250, 100, 500]);
+}
+function hideAlert() {
+  alertBanner.style.display = 'none';
+}
 
 let map = null;
 try {
@@ -146,8 +162,10 @@ if (!tripId) {
     const {
       travelerDisplayName, transportMode, agencyName, originLabel, destinationLabel,
       fareAmount, fareCurrency, vehiclePlate, seatNumber, scheduledDepartureAt, notes,
-      lat, lng, recordedAt,
+      lat, lng, recordedAt, alertActive, lastAlertAt, vehicleAlertCount,
     } = msg;
+
+    if (alertActive) showAlert(lastAlertAt); else hideAlert();
 
     banner.className = 'banner live';
     banner.textContent = `Position en direct — mise à jour à ${new Date(recordedAt).toLocaleTimeString('fr-FR')}`;
@@ -167,13 +185,23 @@ if (!tripId) {
       ['Trajet', `${originLabel || '?'} → ${destinationLabel || '?'}`],
     ];
     if (fareAmount != null) rows.push(['Coût payé', `${Number(fareAmount).toLocaleString('fr-FR')} ${fareCurrency || ''}`]);
-    if (vehiclePlate) rows.push(['Véhicule', `${vehiclePlate}${seatNumber ? ' · siège ' + seatNumber : ''}`]);
+    if (vehiclePlate) rows.push(['Véhicule', `${vehiclePlate}${seatNumber ? ' · siège ' + seatNumber : ''}${vehicleAlertCount ? ' ⚠️ (' + vehicleAlertCount + ' alerte(s) antérieure(s))' : ''}`]);
     if (scheduledDepartureAt) rows.push(['Départ prévu', new Date(scheduledDepartureAt).toLocaleString('fr-FR')]);
     if (notes) rows.push(['Notes', notes]);
 
     detailsTable.innerHTML = rows.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('');
     detailsCard.style.display = 'block';
   });
+
+  socket.on('trip:alert', ({ at }) => showAlert(at));
+  socket.on('trip:alert:cleared', () => hideAlert());
+
+  const signalBanner = document.getElementById('signalBanner');
+  socket.on('trip:signal_lost', ({ silentForMinutes }) => {
+    signalBanner.style.display = 'block';
+    signalBanner.textContent = `⚠️ Plus de nouvelle position depuis ${silentForMinutes} min (téléphone déchargé, zone sans réseau ?).`;
+  });
+  socket.on('trip:signal_restored', () => { signalBanner.style.display = 'none'; });
 }
 </script>
 </body>
