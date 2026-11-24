@@ -165,6 +165,21 @@ async function purgeOldData() {
 
 const app = express();
 app.use(express.json());
+
+// Nettoyage des liens copiés-collés depuis des sources en texte enrichi
+// (WhatsApp, Word, Google Docs, certains claviers avec correction
+// automatique) : ces applications insèrent parfois un caractère Unicode
+// invisible (espaces/joints de largeur nulle, "function application",
+// BOM...) juste après l'URL copiée. Le navigateur l'envoie tel quel,
+// Express ne trouve alors aucune route correspondante et répond
+// "Cannot GET ...". On retire ces caractères avant le routage, pour
+// qu'un lien partagé fonctionne même s'il a été "sali" en chemin.
+app.use((req, res, next) => {
+  const cleaned = req.url.replace(/[​-‏⁠-⁤﻿]/g, '');
+  if (cleaned !== req.url) req.url = cleaned;
+  next();
+});
+
 // Le dashboard opérateur est protégé en amont du serveur de fichiers
 // statiques, sinon express.static servirait la page avant la vérification.
 //
