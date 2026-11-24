@@ -174,9 +174,23 @@ app.use(express.json());
 // Express ne trouve alors aucune route correspondante et répond
 // "Cannot GET ...". On retire ces caractères avant le routage, pour
 // qu'un lien partagé fonctionne même s'il a été "sali" en chemin.
+const INVISIBLE_CHARS_RE = /[​-‏⁠-⁤﻿]/g;
 app.use((req, res, next) => {
-  const cleaned = req.url.replace(/[​-‏⁠-⁤﻿]/g, '');
-  if (cleaned !== req.url) req.url = cleaned;
+  // req.url arrive encodé (ex. "%E2%81%A0" pour le caractère invisible),
+  // donc on doit décoder avant de pouvoir le repérer et le retirer, puis
+  // ré-encoder avant de réaffecter req.url (sinon Express route mal la
+  // requête). Une URL malformée ne doit jamais faire planter le serveur :
+  // en cas d'échec de décodage, on laisse passer telle quelle.
+  try {
+    const [rawPath, rawQuery] = req.url.split('?');
+    const decodedPath = decodeURIComponent(rawPath);
+    const cleanedPath = decodedPath.replace(INVISIBLE_CHARS_RE, '');
+    if (cleanedPath !== decodedPath) {
+      req.url = encodeURI(cleanedPath) + (rawQuery ? '?' + rawQuery : '');
+    }
+  } catch (err) {
+    // URL mal formée : on ne bloque pas la requête, Express gérera l'erreur.
+  }
   next();
 });
 
